@@ -1,0 +1,483 @@
+{
+  "name": "Production Bug RCA Automation created by Claude",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup checklist before activating\n1. Replace the JQL below with your real project key.\n2. Attach your Jira credential to the Jira node.\n3. Attach your Google Sheets credential and select your real spreadsheet + tab in both Google Sheets nodes.\n4. Attach your OpenAI (or other) credential to the AI node and pick a model.\n5. Test with Loop batch size 1 and a small JQL result set first.",
+        "height": 220,
+        "width": 380,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "b2cf26f7-6623-499a-a5f9-42b21ad49e34",
+      "name": "Setup Notes"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        320
+      ],
+      "id": "5d41a2d1-5fdc-4c03-82dc-796df848b2d6",
+      "name": "Every 15 Minutes"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "options": {
+          "jql": "project = \"YOUR_PROJECT_KEY\" AND issuetype = Bug AND (environment ~ \"Production\" OR labels = \"production\" OR priority in (Highest, High)) AND status != Done"
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        240,
+        320
+      ],
+      "id": "2041722f-a34d-4431-a40a-60932cd6f705",
+      "name": "Search Production Bugs in Jira",
+      "alwaysOutputData": true,
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "fX1BcARAqH2WZoUV",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        480,
+        320
+      ],
+      "id": "7771f143-25ba-4fdc-8631-285ab892477f",
+      "name": "Loop Over Issues"
+    },
+    {
+      "parameters": {
+        "content": "Output 0 = \"done\" (fires once, after every issue in this run has been processed)\nOutput 1 = \"loop\" (fires once per issue) — wire your per-issue chain off output 1, and connect the end of that chain back into this node's input.",
+        "height": 140,
+        "width": 300,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        480,
+        112
+      ],
+      "id": "95ccbde3-69d8-4627-bcac-d27c5487b2a7",
+      "name": "Loop Notes"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "19FU5DoI7YgjEjjAuuRzXjlqjPlCe2EFdE9npy8t3G94",
+          "mode": "list",
+          "cachedResultName": "RCA Document ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/19FU5DoI7YgjEjjAuuRzXjlqjPlCe2EFdE9npy8t3G94/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/19FU5DoI7YgjEjjAuuRzXjlqjPlCe2EFdE9npy8t3G94/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        432
+      ],
+      "id": "c12f5d3b-0de2-4c87-87ef-54634a173bf2",
+      "name": "Check If Already In Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "twVgnKCEc23nurbt",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.jira_key }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        432
+      ],
+      "id": "2fb8411f-7234-4e35-95b4-6ce28f59e619",
+      "name": "Already Processed?"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        544
+      ],
+      "id": "b449d98f-d62b-4f2a-9065-a088695c4e38",
+      "name": "Skip - Already Processed"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "jira_key",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.key }}"
+            },
+            {
+              "id": "2",
+              "name": "jira_url",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.self }}"
+            },
+            {
+              "id": "3",
+              "name": "summary",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.summary }}"
+            },
+            {
+              "id": "4",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.description }}"
+            },
+            {
+              "id": "5",
+              "name": "issue_type",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.issuetype.name }}"
+            },
+            {
+              "id": "6",
+              "name": "status",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.status.name }}"
+            },
+            {
+              "id": "7",
+              "name": "priority",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.priority.name }}"
+            },
+            {
+              "id": "8",
+              "name": "reporter",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.reporter.displayName }}"
+            },
+            {
+              "id": "9",
+              "name": "assignee",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.assignee?.displayName || 'Unassigned' }}"
+            },
+            {
+              "id": "10",
+              "name": "created_date",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.created }}"
+            },
+            {
+              "id": "11",
+              "name": "updated_date",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.updated }}"
+            },
+            {
+              "id": "12",
+              "name": "resolution_date",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.resolutiondate || 'Not Resolved Yet' }}"
+            },
+            {
+              "id": "13",
+              "name": "environment",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.environment || 'Not Provided' }}"
+            },
+            {
+              "id": "14",
+              "name": "labels",
+              "type": "string",
+              "value": "={{ ($('Loop Over Issues').item.json.fields.labels || []).join(', ') }}"
+            },
+            {
+              "id": "15",
+              "name": "components",
+              "type": "string",
+              "value": "={{ ($('Loop Over Issues').item.json.fields.components || []).map(c => c.name).join(', ') }}"
+            },
+            {
+              "id": "16",
+              "name": "resolution",
+              "type": "string",
+              "value": "={{ $('Loop Over Issues').item.json.fields.resolution?.name || 'Unresolved' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        192
+      ],
+      "id": "b5696ebe-5ce9-44f5-9298-7a89ad67fc45",
+      "name": "Normalize Jira Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1184,
+        192
+      ],
+      "id": "5d58203f-b679-4d76-924b-a45ff04a05f8",
+      "name": "Generate RCA (AI)",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.message?.content || $input.first().json.text || $input.first().json.content;\n\nif (typeof raw !== 'string') {\n  raw = JSON.stringify(raw);\n}\n\n// Strip accidental code fences if the model added them anyway\nraw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  parsed = {\n    jira_key: $('Normalize Jira Fields').first().json.jira_key,\n    jira_url: $('Normalize Jira Fields').first().json.jira_url,\n    summary: $('Normalize Jira Fields').first().json.summary,\n    confidence: 'Low',\n    missing_information: 'AI generation failed to return valid JSON — manual RCA needed',\n    rca_generated_date: new Date().toISOString().slice(0, 10)\n  };\n}\n\nreturn [{ json: parsed }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        192
+      ],
+      "id": "286b5b37-e532-4c1b-b065-e3c63397c9aa",
+      "name": "Parse RCA JSON"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Production Bug RCAs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "jira_key"
+          ],
+          "value": {
+            "jira_key": "={{ $json.jira_key }}",
+            "jira_url": "={{ $json.jira_url }}",
+            "summary": "={{ $json.summary }}",
+            "reporter": "={{ $json.reporter }}",
+            "assignee": "={{ $json.assignee }}",
+            "severity_priority": "={{ $json.severity_priority }}",
+            "environment": "={{ $json.environment }}",
+            "what_happened": "={{ $json.what_happened }}",
+            "impact_blast_radius": "={{ $json.impact_blast_radius }}",
+            "business_impact": "={{ $json.business_impact }}",
+            "date_introduced": "={{ $json.date_introduced }}",
+            "date_detected": "={{ $json.date_detected }}",
+            "date_resolved": "={{ $json.date_resolved }}",
+            "detection_method": "={{ $json.detection_method }}",
+            "why_1": "={{ $json.why_1 }}",
+            "why_2": "={{ $json.why_2 }}",
+            "why_3": "={{ $json.why_3 }}",
+            "why_4": "={{ $json.why_4 }}",
+            "why_5": "={{ $json.why_5 }}",
+            "technical_factors": "={{ $json.technical_factors }}",
+            "process_factors": "={{ $json.process_factors }}",
+            "detection_gap": "={{ $json.detection_gap }}",
+            "fix_description": "={{ $json.fix_description }}",
+            "fix_verification": "={{ $json.fix_verification }}",
+            "process_improvement": "={{ $json.process_improvement }}",
+            "suggested_owner": "={{ $json.suggested_owner }}",
+            "suggested_target_date": "={{ $json.suggested_target_date }}",
+            "confidence": "={{ $json.confidence }}",
+            "missing_information": "={{ $json.missing_information }}",
+            "rca_generated_date": "={{ $json.rca_generated_date }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1632,
+        192
+      ],
+      "id": "dca5f5da-3643-4fa2-8c06-a7724013379c",
+      "name": "Append or Update RCA Row"
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Search Production Bugs in Jira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Production Bugs in Jira": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Issues": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check If Already In Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalize Jira Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Already In Sheet": {
+      "main": [
+        [
+          {
+            "node": "Already Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Processed?": {
+      "main": [
+        [
+          {
+            "node": "Skip - Already Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip - Already Processed": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse RCA JSON": {
+      "main": [
+        [
+          {
+            "node": "Append or Update RCA Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append or Update RCA Row": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

@@ -1,0 +1,880 @@
+{
+  "name": "Daily QA LinkedIn Post Agent created by Claude",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup checklist\n1. Credentials to attach: OpenAI, Google Gemini (PaLM) API, Google Sheets OAuth2, Telegram API, LinkedIn OAuth2.\n2. Create a Google Sheet called 'QA LinkedIn Post Log' with a tab 'Log' and header row: timestamp, topic, post_text, hashtags, image_prompt, status, notes, linkedin_post_id\n3. Put your Google Sheet's ID into every 'REPLACE_WITH_YOUR_SPREADSHEET_ID' field below.\n4. Put your Telegram chat_id into the two Telegram nodes.\n5. Verify the Google Gemini node's Operation is set to 'Generate an Image' after import — dropdown values can shift between n8n versions.\n6. LinkedIn's w_member_social scope needs app approval — apply for that first, it's the slowest step.\n7. Test with 'Execute Workflow' before activating the schedule.",
+        "height": 528,
+        "width": 420,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -208
+      ],
+      "id": "f727c787-1be6-42bb-84e6-cad79d3aee0b",
+      "name": "Setup Notes"
+    },
+    {
+      "parameters": {
+        "content": "Additions beyond the original spec:\n\n1. TOPIC DEDUP: reads your log sheet first so the Research Agent avoids repeating a topic from the last ~30 posts.\n\n2. AUTO-DISCARD BEFORE HUMAN REVIEW: the Review Agent can reject a draft outright (e.g. factually shaky, off-tone) without wasting your time on a Telegram approval — you only get pinged for drafts that already passed an automated sanity check.\n\n3. RETRY LOOP: if a draft is auto-discarded OR you tap Disapprove, the workflow loops back and generates a brand-new topic/post/image rather than just giving up for the day.\n\n4. ATTEMPT CAP: retries are capped at 3 per day (based on how many Rejected/Auto-Discarded rows exist in today's log) — after that it sends one Telegram message saying it's pausing until tomorrow, instead of looping forever.\n\nEverything is logged to the sheet regardless of outcome, so you always have a full record.",
+        "height": 340,
+        "width": 400,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        352
+      ],
+      "id": "c004a99d-e8c2-4581-90f7-4ba2dfff17ea",
+      "name": "Enhancement Notes"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 15,
+              "triggerAtMinute": 44
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        432
+      ],
+      "id": "c2f879e8-578a-4745-9fc8-a6c04d0b30ba",
+      "name": "Every Day at 9 AM"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        432
+      ],
+      "id": "ac6efd5b-24b5-4e49-971a-8b42781919b9",
+      "name": "Get Recent Topics",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "twVgnKCEc23nurbt",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json);\nconst todayStr = new Date().toISOString().slice(0, 10);\n\nconst recentTopics = rows.slice(-30).map(r => r.topic).filter(Boolean);\n\nconst attemptsToday = rows.filter(r => {\n  const ts = (r.timestamp || '').toString();\n  const status = (r.status || '').toString();\n  return ts.startsWith(todayStr) && (status === 'Rejected by user' || status === 'Auto-Discarded');\n}).length;\n\nreturn [{\n  json: {\n    recent_topics: recentTopics.length ? recentTopics.join('; ') : 'None yet — this is the first post.',\n    attempts_today: attemptsToday\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        432
+      ],
+      "id": "ecf560da-f510-4709-a9b2-b840265e8f7e",
+      "name": "Build Recent Topics Context"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.attempts_today }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "876eab82-2a24-49e1-90bb-b72aef36c92d"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        608,
+        432
+      ],
+      "id": "3812f9e7-8797-4277-92aa-532ad1b5175c",
+      "name": "Under Attempt Limit?"
+    },
+    {
+      "parameters": {
+        "chatId": "831685806",
+        "text": "=Tried {{ $json.attempts_today }} times today without landing on an approved QA post — pausing until tomorrow's 9 AM run. Check the log sheet if you want to see what was generated and discarded.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        608,
+        640
+      ],
+      "id": "f8803f15-40d9-45e1-9439-e42e86b667c0",
+      "name": "Notify Give Up For Today",
+      "webhookId": "a67d944e-79e3-44dc-bf30-68d2c91b589a",
+      "credentials": {
+        "telegramApi": {
+          "id": "uYLEgPT9xzK0CBz1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "latest trends AI in software QA testing"
+            },
+            {
+              "name": "tbs",
+              "value": "qdr:w"
+            },
+            {
+              "name": "api_key",
+              "value": "REPLACE_WITH_YOUR_SERPAPI_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        432
+      ],
+      "id": "1d00c8a4-760d-410a-ae9b-57cb8d74464c",
+      "name": "Search Trending QA/AI News"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a research assistant for a QA/SDET professional's LinkedIn presence. Given raw web search results about QA/testing and AI-in-QA news, identify ONE strong, current, specific topic for today's LinkedIn post. Avoid any topic listed in 'Topics already covered recently' — pick something genuinely different. Use only facts present in the search results; never invent statistics, product names, or events.\n\nReturn ONLY valid JSON, no markdown, no code fences:\n{\n  \"chosen_topic\": \"short topic name\",\n  \"key_findings\": \"2-4 sentences summarizing the specific facts/findings to build the post around, with implicit source context\",\n  \"source_note\": \"one line noting where this came from (e.g. a publication or tool name mentioned in results)\"\n}",
+              "role": "system"
+            },
+            {
+              "content": "=Topics already covered recently: {{ $('Build Recent Topics Context').item.json.recent_topics }}\n\nRaw search results:\n{{ JSON.stringify($json).slice(0, 6000) }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        960,
+        432
+      ],
+      "id": "1bbeed83-bc6e-46b7-af9c-3b4c0bbafd78",
+      "name": "Research & Topic Selection Agent",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rh2oykYvnl2GjxIT",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a senior QA/SDET professional writing a LinkedIn post in your own voice. Using the chosen topic and key findings provided, write one engaging, professional LinkedIn post, 150-220 words. First-person voice, no clickbait, minimal emojis (0-2 max, only if natural), end with a genuine question to invite discussion. Do not include hashtags — those are generated separately. Do not fabricate statistics, quotes, or sources not present in the findings.\n\nReturn ONLY valid JSON, no markdown, no code fences:\n{ \"post_text\": \"the full post\" }",
+              "role": "system"
+            },
+            {
+              "content": "=Topic: {{ $json.chosen_topic }}\nKey findings: {{ $json.key_findings }}\nSource note: {{ $json.source_note }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1200,
+        432
+      ],
+      "id": "16b4e152-8d2f-44a3-8f67-b33a7808ad72",
+      "name": "Content Writer Agent",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rh2oykYvnl2GjxIT",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Given a LinkedIn post about QA/software testing, generate 5-8 relevant, non-generic hashtags. Mix broad ones (#QualityAssurance, #SoftwareTesting) with specific ones tied to the post's actual topic. No duplicates, no unrelated trending tags.\n\nReturn ONLY valid JSON, no markdown, no code fences:\n{ \"hashtags\": \"#Tag1 #Tag2 #Tag3\" }",
+              "role": "system"
+            },
+            {
+              "content": "={{ $json.post_text }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1440,
+        432
+      ],
+      "id": "1024cee6-54a1-4c24-b50a-3dea8999d3ba",
+      "name": "Hashtag Agent",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rh2oykYvnl2GjxIT",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const postText = $json.post_text || '';\nconst topic = $('Research & Topic Selection Agent').item.json.chosen_topic || '';\nconst imagePrompt = `Create a clean, professional, minimalist flat-design illustration representing: ${topic}. Tech/software testing theme, LinkedIn-appropriate, no text or logos anywhere in the image, no readable words.`;\nreturn [{ json: { image_prompt: imagePrompt, post_text: postText, topic } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        432
+      ],
+      "id": "9c85d7d1-4470-4bdc-b3e1-c9c01606c007",
+      "name": "Build Image Prompt"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.1-flash-lite-image",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.1-flash-lite-image"
+        },
+        "prompt": "=",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        432
+      ],
+      "id": "24fd4dfb-ebff-4f5a-a4e9-e95e34abb0c7",
+      "name": "Generate Image (Gemini)",
+      "credentials": {
+        "googlePalmApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a final reviewer for a LinkedIn post before it goes to human approval. Check: professional tone, no fabricated statistics or claims, no controversial or sensitive claims, hashtags actually relevant to the post, and that the post reads naturally. Be reasonably lenient — only flag genuine problems, not stylistic preferences.\n\nReturn ONLY valid JSON, no markdown, no code fences:\n{ \"verdict\": \"APPROVED\" or \"FLAGGED\", \"reason\": \"one sentence, empty string if APPROVED\" }",
+              "role": "system"
+            },
+            {
+              "content": "=Post:\n{{ $('Content Writer Agent').item.json.post_text }}\n\nHashtags:\n{{ $('Hashtag Agent').item.json.hashtags }}\n\nImage description used:\n{{ $('Build Image Prompt').item.json.image_prompt }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        2160,
+        432
+      ],
+      "id": "7184f66c-9a22-45d3-8f03-570ad6168aa5",
+      "name": "Review Agent",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rh2oykYvnl2GjxIT",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.verdict }}",
+              "rightValue": "APPROVED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        432
+      ],
+      "id": "c1800215-78aa-41eb-a94d-6263476d47ae",
+      "name": "Review Passed?"
+    },
+    {
+      "parameters": {
+        "chatId": "831685806",
+        "text": "=⚠️ Today's QA post was auto-discarded by the Review Agent.\n\nTopic: {{ $('Research & Topic Selection Agent').item.json.chosen_topic }}\nReason: {{ $json.reason }}\n\nDraft post:\n{{ $('Content Writer Agent').item.json.post_text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        560
+      ],
+      "id": "7c6c8755-a608-46ff-a2e6-d42a2ed535c2",
+      "name": "Notify Auto-Discard",
+      "webhookId": "faf4f318-fc55-4db6-b0a6-565503dd5d53",
+      "credentials": {
+        "telegramApi": {
+          "id": "uYLEgPT9xzK0CBz1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2880,
+        560
+      ],
+      "id": "1c6fb4e4-d4d3-4356-bfce-6d3a9acf1bf7",
+      "name": "Log Auto-Discarded",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "twVgnKCEc23nurbt",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "831685806",
+        "message": "=📝 Today's QA LinkedIn post is ready for your review:\n\nTopic: {{ $('Research & Topic Selection Agent').item.json.chosen_topic }}\n\nPost:\n{{ $('Content Writer Agent').item.json.post_text }}\n\nHashtags:\n{{ $('Hashtag Agent').item.json.hashtags }}\n\nApprove to publish to LinkedIn now.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 6
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        288
+      ],
+      "id": "105ec1e7-b59b-4576-8b96-7d6450c628d5",
+      "name": "Request Approval (Telegram)",
+      "webhookId": "80ff46e8-ad0e-417f-a5df-d1d10a1f9f39",
+      "credentials": {
+        "telegramApi": {
+          "id": "uYLEgPT9xzK0CBz1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        288
+      ],
+      "id": "d7190d41-eec1-4f1a-950c-9da89bad1383",
+      "name": "Approved?"
+    },
+    {
+      "parameters": {
+        "person": "9aH7GgjCx8",
+        "text": "=={{ $('Content Writer Agent').item.json.post_text }}\n\n{{ $('Hashtag Agent').item.json.hashtags }}",
+        "shareMediaCategory": "IMAGE",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        160
+      ],
+      "id": "17063a78-b695-4d98-8d9c-023214eb654f",
+      "name": "Post to LinkedIn",
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "g0TAoVxTyxtAqJij",
+          "name": "LinkedIn account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3360,
+        160
+      ],
+      "id": "b15bc13d-6c2f-4c5c-8225-ac47f83ca686",
+      "name": "Log Posted",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "twVgnKCEc23nurbt",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "831685806",
+        "text": "=Got it — today's QA post was discarded and will not be published.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3120,
+        400
+      ],
+      "id": "c80c7ec6-7db7-4de4-9418-331fb292a30c",
+      "name": "Notify Discarded",
+      "webhookId": "9ef8aede-3582-41ae-a9e0-7fb315fba4c9",
+      "credentials": {
+        "telegramApi": {
+          "id": "uYLEgPT9xzK0CBz1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1n-z91n1d08gVcUhpnhdBB9EzNCTQfleyAS53xT8PQY8/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3360,
+        400
+      ],
+      "id": "b6403a64-c308-4fdc-bed0-75e8b3668ed1",
+      "name": "Log Rejected",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "twVgnKCEc23nurbt",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Day at 9 AM": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Topics": {
+      "main": [
+        [
+          {
+            "node": "Build Recent Topics Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Recent Topics Context": {
+      "main": [
+        [
+          {
+            "node": "Under Attempt Limit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under Attempt Limit?": {
+      "main": [
+        [
+          {
+            "node": "Search Trending QA/AI News",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Give Up For Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Trending QA/AI News": {
+      "main": [
+        [
+          {
+            "node": "Research & Topic Selection Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research & Topic Selection Agent": {
+      "main": [
+        [
+          {
+            "node": "Content Writer Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Writer Agent": {
+      "main": [
+        [
+          {
+            "node": "Hashtag Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hashtag Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Image (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Review Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Agent": {
+      "main": [
+        [
+          {
+            "node": "Review Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Passed?": {
+      "main": [
+        [
+          {
+            "node": "Request Approval (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Auto-Discard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Auto-Discard": {
+      "main": [
+        [
+          {
+            "node": "Log Auto-Discarded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Auto-Discarded": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Approval (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Discarded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Log Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Discarded": {
+      "main": [
+        [
+          {
+            "node": "Log Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejected": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Every Day at 9 AM": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
